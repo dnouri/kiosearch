@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quick Search</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+        }
+        
+        .search-container {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+        
+        .search-input {
+            padding: 1rem;
+            font-size: 1.2rem;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            width: 100%;
+        }
+        
+        .search-hint {
+            color: #666;
+            font-size: 0.9rem;
+        }
+        
+        .suggestions {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            display: none;
+        }
+        
+        .suggestions li {
+            padding: 0.5rem 1rem;
+            cursor: pointer;
+        }
+        
+        .suggestions li:hover {
+            background-color: #f0f0f0;
+        }
+        
+        .engine-info {
+            margin-top: 1rem;
+            padding: 1rem;
+            background-color: #f5f5f5;
+            border-radius: 8px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="search-container">
+        <input type="text" class="search-input" placeholder="Type a keyword followed by your search...">
+        <div class="search-hint">Try: g your search term</div>
+        <ul class="suggestions"></ul>
+        <div class="engine-info"></div>
+    </div>
+
+    <script>
+        class SearchEngine {
+            constructor(config) {
+                this.name = config.Name || '';
+                this.keys = config.Keys ? config.Keys.split(',') : [];
+                this.queryTemplate = config.Query || '';
+                this.suggestTemplate = config.Suggest || '';
+                this.charset = config.Charset || 'utf8';
+            }
+
+            createSearchURL(query) {
+                return this.queryTemplate.replace('\\{@}', encodeURIComponent(query));
+            }
+
+            createSuggestURL(query) {
+                return this.suggestTemplate ? 
+                    this.suggestTemplate.replace('\\{@}', encodeURIComponent(query)) : 
+                    null;
+            }
+        }
+
+        class SearchManager {
+            constructor() {
+                this.engines = new Map();
+                this.currentEngine = null;
+                this.setupEventListeners();
+            }
+
+            addEngine(config) {
+                const engine = new SearchEngine(config);
+                engine.keys.forEach(key => {
+                    this.engines.set(key.trim(), engine);
+                });
+            }
+
+            setupEventListeners() {
+                const input = document.querySelector('.search-input');
+                const suggestions = document.querySelector('.suggestions');
+                const engineInfo = document.querySelector('.engine-info');
+
+                input.addEventListener('input', async (e) => {
+                    const [prefix, ...searchTerms] = e.target.value.split(' ');
+                    const searchTerm = searchTerms.join(' ');
+                    
+                    if (this.engines.has(prefix)) {
+                        this.currentEngine = this.engines.get(prefix);
+                        engineInfo.textContent = `Using: ${this.currentEngine.name}`;
+                        engineInfo.style.display = 'block';
+
+                        if (searchTerm && this.currentEngine.suggestTemplate) {
+                            try {
+                                const suggestions = await this.fetchSuggestions(searchTerm);
+                                this.displaySuggestions(suggestions);
+                            } catch (error) {
+                                console.error('Error fetching suggestions:', error);
+                            }
+                        }
+                    } else {
+                        this.currentEngine = null;
+                        engineInfo.style.display = 'none';
+                        suggestions.style.display = 'none';
+                    }
+                });
+
+                input.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter' && this.currentEngine) {
+                        const [prefix, ...searchTerms] = input.value.split(' ');
+                        const searchTerm = searchTerms.join(' ');
+                        if (searchTerm) {
+                            const url = this.currentEngine.createSearchURL(searchTerm);
+                            window.location.href = url;
+                        }
+                    }
+                });
+            }
+
+            async fetchSuggestions(query) {
+                if (!this.currentEngine || !this.currentEngine.suggestTemplate) return [];
+                
+                const url = this.currentEngine.createSuggestURL(query);
+                const response = await fetch(url);
+                const data = await response.json();
+                return data[1] || []; // Google's suggestion format
+            }
+
+            displaySuggestions(suggestions) {
+                const suggestionsEl = document.querySelector('.suggestions');
+                if (!suggestions.length) {
+                    suggestionsEl.style.display = 'none';
+                    return;
+                }
+
+                suggestionsEl.innerHTML = suggestions
+                    .map(suggestion => `<li>${suggestion}</li>`)
+                    .join('');
+                suggestionsEl.style.display = 'block';
+
+                suggestionsEl.querySelectorAll('li').forEach(li => {
+                    li.addEventListener('click', () => {
+                        const input = document.querySelector('.search-input');
+                        const [prefix] = input.value.split(' ');
+                        input.value = `${prefix} ${li.textContent}`;
+                        suggestionsEl.style.display = 'none';
+                    });
+                });
+            }
+        }
+
+        // Initialize and add Google search engine
+        const searchManager = new SearchManager();
+        searchManager.addEngine({
+            Name: 'Google',
+            Keys: 'g,gg,google',
+            Query: 'https://www.google.com/search?q=\\{@}&ie=UTF-8',
+            Suggest: 'https://www.google.com/complete/search?q=\\{@}&output=toolbar',
+            Charset: 'utf8'
+        });
+    </script>
+</body>
+</html>
